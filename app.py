@@ -19,6 +19,7 @@ except ImportError:
     pass
 
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from lib.pipeline import run_pipeline
 from lib.supabase_client import (
     get_user_settings,
@@ -31,6 +32,7 @@ from lib.supabase_client import (
 )
 
 app = Flask(__name__)
+CORS(app)  # Permite requisições de outros domínios como o do Roteiriza
 
 # Jobs em memória (cache rápido — Supabase é a source of truth)
 jobs = {}
