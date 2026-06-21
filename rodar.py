@@ -25,7 +25,8 @@ GENERATE_SORA = False
 DYNAMIC_EDITING = True
 
 # CONFIGURAÇÕES DE LEGENDA
-# CAPTION_COLOR: Cor da legenda e do banner do hook em Hexadecimal (ex: "#FF0000" para vermelho, ou None para branco/laranja padrão)
+# CAPTION_COLOR: Cor da legenda e do banner do hook em Hexadecimal (ex: "#FF0000" para vermelho).
+# Se None: legenda branca, banner branco com texto preto. Com cor: banner na cor escolhida com texto branco.
 CAPTION_COLOR = None
 # CAPTION_POSITION: Posição/altura da legenda.
 # Valores suportados: "middle" (no meio), "below_middle" (abaixo do meio) ou "bottom" (embaixo - padrão)

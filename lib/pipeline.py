@@ -931,11 +931,14 @@ def build_hook_frames(W, H, hook_img_a_path, hook_img_b_path, line1, line2, vide
             return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
         return None
 
-    banner_rgb = (255, 140, 0)  # padrão laranja
+    # Padrão: fundo branco, texto preto. Com cor personalizada: fundo na cor escolhida, texto branco.
     if banner_color:
         parsed = hex_to_rgb(banner_color)
-        if parsed:
-            banner_rgb = parsed
+        banner_rgb = parsed if parsed else (255, 255, 255)
+        text_color = "white"
+    else:
+        banner_rgb = (255, 255, 255)  # branco
+        text_color = "black"
     banner_fill = banner_rgb + (255,)  # adiciona alpha=255
 
     # Imagem decorativa: ocupa toda a metade inferior do canvas (W x H/2)
@@ -999,14 +1002,14 @@ def build_hook_frames(W, H, hook_img_a_path, hook_img_b_path, line1, line2, vide
                 decor = decor.crop((0, y0, new_w, y0 + img_h))
             canvas.paste(decor, (0, img_y), decor)
 
-        # Banner laranja superior
+        # Banner superior
         draw = ImageDraw.Draw(canvas)
         draw.rounded_rectangle(
             [(banner_x1, banner_y1), (banner_x2, banner_y2)],
             radius=BANNER_R, fill=banner_fill
         )
-        draw.text((BANNER_CX - tw1 // 2, text_start_y - yo1), line1, fill="white", font=font1)
-        draw.text((BANNER_CX - tw2 // 2, text_start_y + th1 + gap_font - yo2), line2, fill="white", font=font2)
+        draw.text((BANNER_CX - tw1 // 2, text_start_y - yo1), line1, fill=text_color, font=font1)
+        draw.text((BANNER_CX - tw2 // 2, text_start_y + th1 + gap_font - yo2), line2, fill=text_color, font=font2)
 
         suffix = "a" if idx == 0 else "b"
         out_path = os.path.join(workdir, f"hook_frame_{suffix}.png")

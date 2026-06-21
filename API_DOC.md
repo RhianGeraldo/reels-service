@@ -39,7 +39,7 @@ Endpoint responsável por colocar um novo vídeo na fila de processamento.
 | `generate_sora` | `boolean` | Não | `true` | Habilita geração de B-Rolls via IA de vídeo (Sora/Luma/Runway). |
 | `hook_line1` | `string` | Não | `null` | Força o texto da 1ª linha do Banner de Hook (ignora a IA). |
 | `hook_line2` | `string` | Não | `null` | Força o texto da 2ª linha do Banner de Hook (ignora a IA). |
-| `caption_color` | `string` | Não | `null` | Cor da legenda e do banner do hook em Hexadecimal (ex: `"#FF0000"`, `"FF0000"`). Se `null`, legenda fica **branca** e banner fica **laranja** (padrão). |
+| `caption_color` | `string` | Não | `null` | Cor da legenda e do banner do hook em Hexadecimal (ex: `"#FF0000"`, `"FF0000"`). Se `null`, legenda fica **branca** e banner fica **branco** com texto preto (padrão). Se tiver cor: banner usa a cor com texto branco. |
 | `caption_position` | `string` | Não | `null` | Posição vertical da legenda: `"middle"`, `"below_middle"`, `"bottom"` (padrão). |
 | `denoise_audio` | `boolean` | Não | `true` | Se `true`, aplica filtro de redução de ruído neural (RNNoise) no áudio do vídeo. |
 | `music_url` | `string` | Não | `null` | URL da trilha sonora: link do YouTube, Google Drive, Dropbox, link direto mp3/wav, nome de arquivo local em `music/`, ou `"none"` para desativar. Se `null`, usa a música padrão. |
