@@ -251,7 +251,7 @@ def run_pipeline(
         if remove_silences:
             try:
                 subprocess.run(
-                    [sys.executable, "-m", "auto_editor", cfr_path, "--margin", "1.65s", "-o", nosilence_path],
+                    [sys.executable, "-m", "auto_editor", cfr_path, "--margin", "1.0s", "-o", nosilence_path],
                     capture_output=True, check=True, timeout=300
                 )
             except (subprocess.CalledProcessError, FileNotFoundError):
