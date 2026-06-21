@@ -1,6 +1,6 @@
 # Documentação da API - Reels Service
 
-Esta documentação detalha como integrar o **Reels Service** (Processador Automático de Vídeos) com o seu sistema **Roteiriza**. 
+Esta documentação detalha como integrar o **Reels Service** (Processador Automático de Vídeos) com o seu sistema **Roteiriza**.
 
 A API foi projetada de forma assíncrona. Isso significa que você envia a requisição de edição e ela retorna imediatamente com um `job_id`. O processamento pesadíssimo acontece no servidor em segundo plano, e você usa o `job_id` para consultar o progresso.
 
@@ -30,28 +30,44 @@ Endpoint responsável por colocar um novo vídeo na fila de processamento.
 | Parâmetro | Tipo | Obrigatório | Padrão | Descrição |
 | :--- | :---: | :---: | :---: | :--- |
 | `user_id` | `string` | Sim | - | O identificador do usuário do Roteiriza. Usado para buscar as chaves da OpenAI/Gemini/OpenRouter cadastradas no Supabase. |
-| `video_url` | `string` | Sim | - | URL pública ou assinada do vídeo bruto (.mp4) que será editado. |
-| `dynamic_editing` | `boolean` | Não | `true` | Se `true`, ativa a inteligência artificial para achar cortes de 5s, colocar barras laranjas e aplicar zooms dinâmicos. Se `false`, o vídeo não sofre os cortes de AI (modo pass-through super rápido). |
-| `remove_silences` | `boolean` | Não | `true` | Se `true`, passa pelo `auto-editor` para remover os respiros mortos do áudio. |
-| `generate_captions` | `boolean` | Não | `true` | Se `true`, realiza a transcrição completa usando Whisper e aplica legenda karaokê na tela final. |
-| `generate_overlays` | `boolean` | Não | `true` | Se `true`, o LLM vai planejar e gerar imagens com IA para jogar no meio do vídeo e ilustrar o que você fala (Só funciona se `dynamic_editing` for `true`). |
-| `image_provider` | `string` | Não | `"gemini"` | Qual IA usar para gerar imagens (`"gemini"` ou `"openai"`). O sistema também possui fallback pro OpenRouter internamente. |
-| `generate_sora` | `boolean` | Não | `true` | Habilita a geração e inserção de B-Rolls dinâmicos através de IA geradora de vídeo (Sora/Luma/Runway se conectados). |
-| `hook_line1` | `string` | Não | `null` | (Opcional) Forçar o texto da primeira linha do Banner Laranja (Ignora o LLM). |
-| `hook_line2` | `string` | Não | `null` | (Opcional) Forçar o texto da segunda linha do Banner Laranja (Ignora o LLM). |
+| `video_url` | `string` | Sim | - | URL pública do vídeo bruto (.mp4). Suporta links diretos, Google Drive (`/file/d/...` ou `?id=...`), Dropbox e YouTube (somente para músicas). |
+| `dynamic_editing` | `boolean` | Não | `true` | Se `true`, ativa a IA para achar cortes, colocar barras de hook e aplicar zooms dinâmicos. Se `false`, ativa o modo pass-through (rápido). |
+| `remove_silences` | `boolean` | Não | `true` | Se `true`, usa o `auto-editor` para remover silêncios do áudio. |
+| `generate_captions` | `boolean` | Não | `true` | Se `true`, transcreve com Whisper e aplica legenda karaokê. |
+| `generate_overlays` | `boolean` | Não | `true` | Se `true`, gera imagens IA para sobrepor no vídeo (só funciona com `dynamic_editing: true`). |
+| `image_provider` | `string` | Não | `"gemini"` | Qual IA gera as imagens: `"gemini"` ou `"openai"`. |
+| `generate_sora` | `boolean` | Não | `true` | Habilita geração de B-Rolls via IA de vídeo (Sora/Luma/Runway). |
+| `hook_line1` | `string` | Não | `null` | Força o texto da 1ª linha do Banner de Hook (ignora a IA). |
+| `hook_line2` | `string` | Não | `null` | Força o texto da 2ª linha do Banner de Hook (ignora a IA). |
+| `caption_color` | `string` | Não | `null` | Cor da legenda em Hexadecimal (ex: `"#FF0000"`, `"FF0000"`). Se `null`, o padrão é **branco**. |
+| `caption_position` | `string` | Não | `null` | Posição vertical da legenda: `"middle"`, `"below_middle"`, `"bottom"` (padrão). |
+| `denoise_audio` | `boolean` | Não | `true` | Se `true`, aplica filtro de redução de ruído neural (RNNoise) no áudio do vídeo. |
+| `music_url` | `string` | Não | `null` | URL da trilha sonora: link do YouTube, Google Drive, Dropbox, link direto mp3/wav, nome de arquivo local em `music/`, ou `"none"` para desativar. Se `null`, usa a música padrão. |
+| `music_volume` | `float` | Não | `0.15` | Volume da música de fundo (entre `0.0` e `1.0`). |
+| `visual_filter` | `string` | Não | `null` | Preset criativo de cores: `"vibrant"`, `"cinematic"`, `"vintage"`, `"cool"`, `"b&w"`. `null` desativa. |
+| `brightness` | `float` | Não | `0.0` | Ajuste de brilho (-1.0 a 1.0). Pode ser combinado com `visual_filter`. |
+| `contrast` | `float` | Não | `1.0` | Multiplicador de contraste (0.0 a 10.0). |
+| `saturation` | `float` | Não | `1.0` | Multiplicador de saturação (0.0 a 10.0). |
+| `sharpness` | `float` | Não | `0.0` | Intensidade do filtro de nitidez, filtro `unsharp` (0.0 a 2.0). `0.0` desativa. |
 
-### Exemplo de Requisição (Pass-through Básico: Somente limpar respiros + legendas)
+### Exemplo de Requisição (Pass-through com filtro cinematográfico e legenda branca)
 ```bash
 curl -X POST https://api-seuservidor.com/edit \
   -H "Authorization: Bearer SEU_SERVICE_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "usuario-roteiriza-123",
-    "video_url": "https://meu-s3.com/video-bruto.mp4",
+    "video_url": "https://drive.google.com/file/d/SEU_ID/view?usp=sharing",
     "dynamic_editing": false,
     "remove_silences": true,
     "generate_captions": true,
-    "generate_overlays": false
+    "caption_color": null,
+    "caption_position": "below_middle",
+    "denoise_audio": true,
+    "music_url": "https://www.youtube.com/watch?v=OPugs48z2GU",
+    "music_volume": 0.10,
+    "visual_filter": "cinematic",
+    "sharpness": 1.0
   }'
 ```
 
@@ -79,7 +95,7 @@ Após iniciar o processamento, seu frontend ou backend do Roteiriza pode bater n
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "processing",
   "progress": 42,
-  "step": "generating_sora_videos"
+  "step": "generating_captions"
 }
 ```
 
@@ -107,7 +123,7 @@ Após iniciar o processamento, seu frontend ou backend do Roteiriza pode bater n
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "failed",
   "progress": 28,
-  "step": "generating_hook_images",
+  "step": "generating_captions",
   "error": "OpenAI API key not configured in settings"
 }
 ```

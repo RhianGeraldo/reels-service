@@ -47,6 +47,60 @@ for fp in [
         break
 
 
+def download_file(url, destination_path):
+    import re
+    import requests
+
+    # 1. Google Drive
+    match_drive = re.search(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)", url)
+    if not match_drive:
+        match_drive = re.search(r"drive\.google\.com/open\?id=([a-zA-Z0-9_-]+)", url)
+    if not match_drive:
+        match_drive = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url) if "drive.google.com" in url else None
+
+    if match_drive:
+        drive_id = match_drive.group(1)
+        print(f"[REELS] Downloading from Google Drive ID: {drive_id}", flush=True)
+        session = requests.Session()
+        download_url = "https://docs.google.com/uc?export=download"
+        resp = session.get(download_url, params={"id": drive_id}, stream=True, timeout=120)
+        token = None
+        for key, value in resp.cookies.items():
+            if key.startswith("download_warning"):
+                token = value
+                break
+        if token:
+            resp = session.get(download_url, params={"id": drive_id, "confirm": token}, stream=True, timeout=120)
+        resp.raise_for_status()
+    else:
+        # 2. Dropbox
+        if "dropbox.com" in url and "dl=1" not in url:
+            if "dl=0" in url:
+                url = url.replace("dl=0", "dl=1")
+            elif "?" in url:
+                url += "&dl=1"
+            else:
+                url += "?dl=1"
+        print(f"[REELS] Downloading from URL: {url}", flush=True)
+        resp = requests.get(url, stream=True, timeout=120)
+        resp.raise_for_status()
+
+    # Verificar se retornou HTML
+    content_type = resp.headers.get("Content-Type", "").lower()
+    if "text/html" in content_type:
+        first_chunk = next(resp.iter_content(chunk_size=100), b"")
+        if b"<!doctype" in first_chunk.lower() or b"<html" in first_chunk.lower() or b"<head" in first_chunk.lower():
+            raise ValueError("URL returned an HTML page instead of the binary file. Check permissions/link.")
+        with open(destination_path, "wb") as f:
+            f.write(first_chunk)
+            for chunk in resp.iter_content(chunk_size=32768):
+                f.write(chunk)
+    else:
+        with open(destination_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=32768):
+                f.write(chunk)
+
+
 def run_pipeline(
     video_url: str,
     user_id: str,
@@ -64,6 +118,16 @@ def run_pipeline(
     generate_captions_enabled: bool = True,
     generate_overlays: bool = True,
     dynamic_editing: bool = True,
+    caption_color: str | None = None,
+    caption_position: str | None = None,
+    denoise_audio: bool = True,
+    music_url: str | None = None,
+    music_volume: float = 0.15,
+    visual_filter: str | None = None,
+    brightness: float = 0.0,
+    contrast: float = 1.0,
+    saturation: float = 1.0,
+    sharpness: float = 0.0,
 ) -> dict:
 
     if zoom_levels is None:
@@ -83,11 +147,7 @@ def run_pipeline(
         # ===== 1. DOWNLOAD VIDEO =====
         progress(5, "downloading_video")
         video_path = os.path.join(workdir, "bruto.mp4")
-        resp = requests.get(video_url, stream=True, timeout=120)
-        resp.raise_for_status()
-        with open(video_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
+        download_file(video_url, video_path)
         print(f"[REELS] Downloaded: {os.path.getsize(video_path)} bytes", flush=True)
 
         # Obter resolução + rotation metadata
@@ -124,14 +184,66 @@ def run_pipeline(
         vf_parts.append(f"scale={W}:{H}:force_original_aspect_ratio=increase")
         vf_parts.append(f"crop={W}:{H}")
         vf_parts.append("fps=30")
+
+        # Filtros de cor e presets visuais
+        preset_brightness = 0.0
+        preset_contrast = 1.0
+        preset_saturation = 1.0
+        colorbalance_filter = None
+
+        if visual_filter:
+            vf_lower = visual_filter.lower().strip()
+            if vf_lower in ("vibrant", "vibrante"):
+                preset_contrast = 1.05
+                preset_saturation = 1.25
+                preset_brightness = 0.01
+            elif vf_lower in ("cinematic", "cinematografico", "cinematográfico"):
+                preset_contrast = 1.12
+                preset_saturation = 1.10
+                preset_brightness = -0.01
+                colorbalance_filter = "colorbalance=rs=0.06:gs=0.01:bs=-0.04"
+            elif vf_lower in ("vintage", "retro"):
+                preset_contrast = 0.95
+                preset_saturation = 0.85
+                preset_brightness = 0.02
+                colorbalance_filter = "colorbalance=rs=0.08:gs=0.03:bs=-0.06"
+            elif vf_lower in ("cool", "frio"):
+                preset_contrast = 1.02
+                preset_saturation = 0.95
+                colorbalance_filter = "colorbalance=rs=-0.05:gs=-0.01:bs=0.08"
+            elif vf_lower in ("b&w", "bw", "preto_e_branco", "pb"):
+                preset_contrast = 1.15
+                preset_saturation = 0.0
+                preset_brightness = 0.02
+
+        final_brightness = max(-1.0, min(1.0, preset_brightness + brightness))
+        final_contrast = max(0.0, min(10.0, preset_contrast * contrast))
+        final_saturation = max(0.0, min(10.0, preset_saturation * saturation))
+
+        if final_brightness != 0.0 or final_contrast != 1.0 or final_saturation != 1.0:
+            vf_parts.append(f"eq=brightness={final_brightness:.2f}:contrast={final_contrast:.2f}:saturation={final_saturation:.2f}")
+
+        if colorbalance_filter:
+            vf_parts.append(colorbalance_filter)
+
+        if sharpness > 0.0:
+            vf_parts.append(f"unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount={sharpness:.2f}")
+
         vf = ",".join(vf_parts)
-        subprocess.run([
+
+        cmd = [
             "ffmpeg", "-y", "-display_rotation", "0", "-i", video_path,
             "-vf", vf,
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        ]
+        if denoise_audio:
+            model_path = os.path.join(os.path.dirname(__file__), "sh.rnnn")
+            cmd.extend(["-af", f"highpass=f=100,arnndn=model='{model_path}'"])
+        cmd.extend([
             "-c:a", "aac", "-b:a", "128k", "-video_track_timescale", "30000",
             cfr_path
-        ], capture_output=True, check=True)
+        ])
+        subprocess.run(cmd, capture_output=True, check=True)
 
         # ===== 3. REMOVE SILENCES =====
         progress(12, "removing_silences")
@@ -301,7 +413,11 @@ def run_pipeline(
         progress(80, "generating_captions")
         print(f"[REELS] noCaption file: {os.path.getsize(noCaption_path)} bytes", flush=True)
         if generate_captions_enabled:
-            ass_path = generate_captions(noCaption_path, openai_key, W, H, workdir, groq_key=groq_key, openrouter_key=openrouter_key)
+            ass_path = generate_captions(
+                noCaption_path, openai_key, W, H, workdir,
+                groq_key=groq_key, openrouter_key=openrouter_key,
+                caption_color=caption_color, caption_position=caption_position
+            )
             print(f"[REELS] ASS captions generated", flush=True)
         else:
             ass_path = None
@@ -316,10 +432,68 @@ def run_pipeline(
                 except:
                     pass
 
-        # ===== 11. BURN CAPTIONS + 3-AUDIO MIX =====
+        # ===== 11. DOWNLOAD MUSIC + BURN CAPTIONS + 3-AUDIO MIX =====
+        progress(82, "downloading_music")
+        resolved_music_path = MUSIC_PATH  # default
+        if music_url:
+            m_url = music_url.strip().lower()
+            if m_url == "none":
+                resolved_music_path = None
+                print("[REELS] Music disabled by user.", flush=True)
+            else:
+                m_url = music_url.strip()
+                try:
+                    progress(82, "downloading_music")
+                    downloaded_music = os.path.join(workdir, "bg_music.mp3")
+
+                    # YouTube -> yt-dlp
+                    is_youtube = "youtube.com" in m_url or "youtu.be" in m_url
+                    if is_youtube:
+                        import sys as _sys
+                        yt_dlp_bin = os.path.join(os.path.dirname(_sys.executable), "yt-dlp")
+                        temp_output_template = os.path.join(workdir, "yt_download.%(ext)s")
+                        cmd = [yt_dlp_bin, "--no-playlist", "-x", "--audio-format", "mp3",
+                               "-o", temp_output_template, m_url]
+                        print(f"[REELS] Downloading YouTube audio using command: {' '.join(cmd)}", flush=True)
+                        res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+                        if res.returncode != 0:
+                            raise ValueError(f"yt-dlp failed: {res.stderr}")
+                        extracted_mp3 = os.path.join(workdir, "yt_download.mp3")
+                        if os.path.exists(extracted_mp3):
+                            shutil.move(extracted_mp3, downloaded_music)
+                        else:
+                            found = False
+                            for f_name in os.listdir(workdir):
+                                if f_name.startswith("yt_download") and f_name.endswith(".mp3"):
+                                    shutil.move(os.path.join(workdir, f_name), downloaded_music)
+                                    found = True
+                                    break
+                            if not found:
+                                raise ValueError("Could not find extracted mp3 file from yt-dlp")
+                        resolved_music_path = downloaded_music
+                        print(f"[REELS] YouTube audio successfully downloaded: {os.path.getsize(resolved_music_path)} bytes", flush=True)
+                    else:
+                        # Google Drive, Dropbox, or direct link
+                        download_file(m_url, downloaded_music)
+                        resolved_music_path = downloaded_music
+                        print(f"[REELS] Downloaded custom music: {os.path.getsize(resolved_music_path)} bytes", flush=True)
+
+                except Exception as e:
+                    print(f"[REELS] Failed to download/verify music from {m_url} (error: {e}). Falling back to default music.", flush=True)
+                    resolved_music_path = MUSIC_PATH
+        else:
+            # Check if it's a local file in music/
+            if music_url is None:
+                resolved_music_path = MUSIC_PATH
+
         progress(85, "burning_captions")
         print("[REELS] Starting burn_captions_and_music (3-audio mix)...", flush=True)
-        final_path = burn_captions_and_music(noCaption_path, ass_path, workdir, sfx_track_path=sfx_track_path)
+        final_path = burn_captions_and_music(
+            noCaption_path, ass_path, workdir,
+            sfx_track_path=sfx_track_path,
+            music_path=resolved_music_path,
+            music_volume=music_volume
+        )
         print(f"[REELS] Final video: {os.path.getsize(final_path)} bytes", flush=True)
         progress(92, "video_finalized")
 
@@ -1209,13 +1383,36 @@ def collect_sfx_timestamps(segments, overlay_data, hook_dur):
     return timestamps
 
 
-def generate_captions(video_path, openai_key, W, H, workdir, groq_key=None, openrouter_key=None):
+def generate_captions(video_path, openai_key, W, H, workdir, groq_key=None, openrouter_key=None, caption_color=None, caption_position=None):
     """Gera captions ASS karaokê a partir do vídeo renderizado."""
     transcription = transcribe_whisper(video_path, openai_key, workdir, groq_key=groq_key, openrouter_key=openrouter_key)
     words = transcription.get("words", [])
 
     FONT_SIZE = max(int(60 * W / 1080), 20)
     WORDS_PER_LINE = 5
+
+    # Cor da legenda: hex -> ASS ABGR
+    primary_colour = "&H00FFFFFF"  # padrão branco
+    if caption_color:
+        import re as _re
+        hex_color = caption_color.lstrip("#")
+        if _re.match(r'^[0-9A-Fa-f]{6}$', hex_color):
+            r = hex_color[0:2]
+            g = hex_color[2:4]
+            b = hex_color[4:6]
+            primary_colour = f"&H00{b}{g}{r}".upper()
+        elif _re.match(r'^&H[0-9A-Fa-f]{8}$', caption_color, _re.IGNORECASE):
+            primary_colour = caption_color.upper()
+
+    # Posição vertical da legenda
+    margin_v = int(H * 0.15)  # padrão: bottom
+    pos_norm = (caption_position or "").lower().strip()
+    if pos_norm in ("middle", "meio"):
+        margin_v = int(H * 0.50)
+    elif pos_norm in ("below_middle", "abaixo_do_meio"):
+        margin_v = int(H * 0.30)
+    elif pos_norm in ("bottom", "baixo"):
+        margin_v = int(H * 0.15)
 
     lines = []
     for i in range(0, len(words), WORDS_PER_LINE):
@@ -1236,7 +1433,7 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,Helvetica Neue,{FONT_SIZE},&H0000B0FF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,30,30,{int(H * 0.15)},1
+Style: Karaoke,Helvetica Neue,{FONT_SIZE},{primary_colour},&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,5,0,2,30,30,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1262,10 +1459,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return ass_path
 
 
-def burn_captions_and_music(video_path, ass_path, workdir, sfx_track_path=None):
-    """Burn ASS captions + 3-audio mix (voz + musica + SFX). Fallback graceful."""
+def burn_captions_and_music(video_path, ass_path, workdir, sfx_track_path=None, music_path=None, music_volume=0.15):
+    """Burn ASS captions + static audio mix (voz + musica + SFX) using amerge+pan for stable levels."""
     with_caption = os.path.join(workdir, "reels_withCaption.mp4")
-    
+
     if ass_path:
         subprocess.run([
             "ffmpeg", "-y", "-noautorotate", "-i", video_path,
@@ -1279,35 +1476,56 @@ def burn_captions_and_music(video_path, ass_path, workdir, sfx_track_path=None):
 
     final_path = os.path.join(workdir, "REELS_FINAL.mp4")
 
-    has_music = os.path.exists(MUSIC_PATH)
+    if music_path is None:
+        music_path = MUSIC_PATH
+
+    has_music = music_path and os.path.exists(music_path)
     has_sfx = sfx_track_path and os.path.exists(sfx_track_path)
 
+    vol = max(0.0, min(1.0, float(music_volume)))
+
     if has_music and has_sfx:
-        # 3-audio mix: voice + music + SFX
         print("[REELS] 3-audio mix: voice + music + SFX", flush=True)
+        duration = get_duration(with_caption)
+        fade_start = max(0.0, duration - 1.5)
         subprocess.run([
-            "ffmpeg", "-y", "-noautorotate", "-i", with_caption, "-i", MUSIC_PATH, "-i", sfx_track_path,
+            "ffmpeg", "-y", "-noautorotate",
+            "-i", with_caption, "-i", music_path, "-i", sfx_track_path,
             "-filter_complex",
-            "[1:a]volume=0.04[m];[2:a]volume=0.20[sfx];[0:a][m][sfx]amix=inputs=3:duration=first:normalize=0[a]",
-            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            f"[0:a]aformat=channel_layouts=stereo[v];"
+            f"[1:a]volume={vol},afade=t=out:st={fade_start:.3f}:d=1.5,aformat=channel_layouts=stereo[m];"
+            f"[2:a]volume=0.20,aformat=channel_layouts=stereo[sfx];"
+            f"[v][m][sfx]amerge=inputs=3,pan=stereo|FL=c0+c2+c4|FR=c1+c3+c5[a]",
+            "-map", "0:v", "-map", "[a]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart", final_path
         ], capture_output=True, check=True)
     elif has_music:
-        # 2-audio mix: voice + music (original behavior)
         print("[REELS] 2-audio mix: voice + music", flush=True)
+        duration = get_duration(with_caption)
+        fade_start = max(0.0, duration - 1.5)
         subprocess.run([
-            "ffmpeg", "-y", "-noautorotate", "-i", with_caption, "-i", MUSIC_PATH,
-            "-filter_complex", "[1:a]volume=0.04[m];[0:a][m]amix=inputs=2:duration=first:normalize=0[a]",
-            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "ffmpeg", "-y", "-noautorotate",
+            "-i", with_caption, "-i", music_path,
+            "-filter_complex",
+            f"[0:a]aformat=channel_layouts=stereo[v];"
+            f"[1:a]volume={vol},afade=t=out:st={fade_start:.3f}:d=1.5,aformat=channel_layouts=stereo[m];"
+            f"[v][m]amerge=inputs=2,pan=stereo|FL=c0+c2|FR=c1+c3[a]",
+            "-map", "0:v", "-map", "[a]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart", final_path
         ], capture_output=True, check=True)
     elif has_sfx:
-        # 2-audio mix: voice + SFX
         print("[REELS] 2-audio mix: voice + SFX", flush=True)
         subprocess.run([
-            "ffmpeg", "-y", "-noautorotate", "-i", with_caption, "-i", sfx_track_path,
-            "-filter_complex", "[1:a]volume=0.20[sfx];[0:a][sfx]amix=inputs=2:duration=first:normalize=0[a]",
-            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "ffmpeg", "-y", "-noautorotate",
+            "-i", with_caption, "-i", sfx_track_path,
+            "-filter_complex",
+            "[0:a]aformat=channel_layouts=stereo[v];"
+            "[1:a]volume=0.20,aformat=channel_layouts=stereo[sfx];"
+            "[v][sfx]amerge=inputs=2,pan=stereo|FL=c0+c2|FR=c1+c3[a]",
+            "-map", "0:v", "-map", "[a]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart", final_path
         ], capture_output=True, check=True)
     else:

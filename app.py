@@ -101,6 +101,16 @@ def edit_reels():
     generate_captions_enabled = data.get("generate_captions", True)
     generate_overlays = data.get("generate_overlays", True)
     dynamic_editing = data.get("dynamic_editing", True)
+    caption_color = data.get("caption_color")
+    caption_position = data.get("caption_position")
+    denoise_audio = data.get("denoise_audio", True)
+    music_url = data.get("music_url")
+    music_volume = float(data.get("music_volume", 0.15))
+    visual_filter = data.get("visual_filter")
+    brightness = float(data.get("brightness", 0.0))
+    contrast = float(data.get("contrast", 1.0))
+    saturation = float(data.get("saturation", 1.0))
+    sharpness = float(data.get("sharpness", 0.0))
 
     job_id = str(uuid.uuid4())
 
@@ -170,6 +180,16 @@ def edit_reels():
                 generate_captions_enabled=generate_captions_enabled,
                 generate_overlays=generate_overlays,
                 dynamic_editing=dynamic_editing,
+                caption_color=caption_color,
+                caption_position=caption_position,
+                denoise_audio=denoise_audio,
+                music_url=music_url,
+                music_volume=music_volume,
+                visual_filter=visual_filter,
+                brightness=brightness,
+                contrast=contrast,
+                saturation=saturation,
+                sharpness=sharpness,
             )
 
             jobs[job_id]["status"] = "completed"

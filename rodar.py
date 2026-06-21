@@ -13,7 +13,8 @@ from lib.supabase_client import create_job, update_job
 # =====================================================================
 # CONFIGURAÇÕES (Altere a URL do vídeo aqui!)
 # =====================================================================
-VIDEO_URL = "https://drive.google.com/uc?export=download&id=1nKwp67CtdcxvBPU5BtAfbEKyGQeDgZEV"
+VIDEO_URL = "https://drive.google.com/file/d/1Z5u7ltXp_HNHYHlzR_8MjgPPcj-0_4K3/view?usp=drive_link"
+#VIDEO_URL = "https://drive.google.com/uc?export=download&id=1nKwp67CtdcxvBPU5BtAfbEKyGQeDgZEV"
 USER_ID = "rhian-dev"
 
 # OPÇÕES DE EDIÇÃO (Altere para True ou False conforme necessário)
@@ -22,6 +23,35 @@ GENERATE_CAPTIONS = True
 GENERATE_OVERLAYS = False
 GENERATE_SORA = False
 DYNAMIC_EDITING = False
+
+# CONFIGURAÇÕES DE LEGENDA
+# CAPTION_COLOR: Cor da legenda em Hexadecimal (ex: "#FF0000" para vermelho, ou None para o padrão branco)
+CAPTION_COLOR = None
+# CAPTION_POSITION: Posição/altura da legenda.
+# Valores suportados: "middle" (no meio), "below_middle" (abaixo do meio) ou "bottom" (embaixo - padrão)
+CAPTION_POSITION = "below_middle"
+
+# REMOÇÃO DE RUÍDO
+# DENOISE_AUDIO: Se True, aplica um filtro FFT de redução de ruído no áudio do vídeo
+DENOISE_AUDIO = True
+
+# MÚSICA DE FUNDO
+# MUSIC_URL: URL (http/https) de uma música, nome de arquivo local em "music/" ou None para o padrão. Use "none" para desativar.
+MUSIC_URL = "https://www.youtube.com/watch?v=OPugs48z2GU"
+# MUSIC_VOLUME: Volume da música de fundo (float entre 0.0 e 1.0. Ex: 0.15 para 15%)
+MUSIC_VOLUME = 0.10
+
+# FILTROS VISUAIS E AJUSTES DE IMAGEM
+# VISUAL_FILTER: Preset criativo de cores ("vibrant", "cinematic", "vintage", "cool", "b&w" ou None para desativar)
+VISUAL_FILTER = "cinematic"
+# BRIGHTNESS: Ajuste de brilho (-1.0 a 1.0, sendo 0.0 o padrão)
+BRIGHTNESS = 0.0
+# CONTRAST: Ajuste de contraste (0.0 a 10.0, sendo 1.0 o padrão)
+CONTRAST = 1.0
+# SATURATION: Ajuste de saturação (0.0 a 10.0, sendo 1.0 o padrão)
+SATURATION = 0.5
+# SHARPNESS: Nitidez (0.0 a 2.0, sendo 0.0 desativado)
+SHARPNESS = 1.0
 # =====================================================================
 
 
@@ -83,7 +113,17 @@ def main():
             remove_silences=REMOVE_SILENCES,
             generate_captions_enabled=GENERATE_CAPTIONS,
             generate_overlays=GENERATE_OVERLAYS,
-            dynamic_editing=DYNAMIC_EDITING
+            dynamic_editing=DYNAMIC_EDITING,
+            caption_color=CAPTION_COLOR,
+            caption_position=CAPTION_POSITION,
+            denoise_audio=DENOISE_AUDIO,
+            music_url=MUSIC_URL,
+            music_volume=MUSIC_VOLUME,
+            visual_filter=VISUAL_FILTER,
+            brightness=BRIGHTNESS,
+            contrast=CONTRAST,
+            saturation=SATURATION,
+            sharpness=SHARPNESS
         )
         
         print("\n🎉 VÍDEO EDITADO COM SUCESSO!")
