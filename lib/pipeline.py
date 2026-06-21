@@ -251,7 +251,7 @@ def run_pipeline(
         if remove_silences:
             try:
                 subprocess.run(
-                    [sys.executable, "-m", "auto_editor", cfr_path, "--margin", "0.15s", "-o", nosilence_path],
+                    [sys.executable, "-m", "auto_editor", cfr_path, "--margin", "1.65s", "-o", nosilence_path],
                     capture_output=True, check=True, timeout=300
                 )
             except (subprocess.CalledProcessError, FileNotFoundError):
@@ -376,7 +376,8 @@ def run_pipeline(
             # ===== 8. BUILD HOOK FRAMES =====
             progress(58, "building_hook_frames")
             hook_frame_a, hook_frame_b, video_start_y, crop_top = build_hook_frames(
-                W, H, hook_img_a, hook_img_b, hook_l1, hook_l2, nosilence_path, workdir
+                W, H, hook_img_a, hook_img_b, hook_l1, hook_l2, nosilence_path, workdir,
+                banner_color=caption_color
             )
 
             # ===== 9. EDIT VIDEO (zoom + hook + Ken Burns + transitions) =====
@@ -917,10 +918,25 @@ def generate_overlay_images(overlay_specs, provider, openai_key, gemini_key, wor
     return results
 
 
-def build_hook_frames(W, H, hook_img_a_path, hook_img_b_path, line1, line2, video_path, workdir):
-    """PNG RGBA full canvas: banner laranja superior + imagem decorativa ocupando metade inferior.
+def build_hook_frames(W, H, hook_img_a_path, hook_img_b_path, line1, line2, video_path, workdir, banner_color=None):
+    """PNG RGBA full canvas: banner superior personalizável + imagem decorativa ocupando metade inferior.
     Vídeo entra por baixo no edit_video (overlay). Mantém assinatura legada."""
     import numpy as np
+    import re as _re
+
+    # Resolver cor do banner: hex -> RGB, padrão laranja
+    def hex_to_rgb(hex_color):
+        h = hex_color.lstrip("#")
+        if _re.match(r'^[0-9A-Fa-f]{6}$', h):
+            return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+        return None
+
+    banner_rgb = (255, 140, 0)  # padrão laranja
+    if banner_color:
+        parsed = hex_to_rgb(banner_color)
+        if parsed:
+            banner_rgb = parsed
+    banner_fill = banner_rgb + (255,)  # adiciona alpha=255
 
     # Imagem decorativa: ocupa toda a metade inferior do canvas (W x H/2)
     img_h = H // 2
@@ -987,7 +1003,7 @@ def build_hook_frames(W, H, hook_img_a_path, hook_img_b_path, line1, line2, vide
         draw = ImageDraw.Draw(canvas)
         draw.rounded_rectangle(
             [(banner_x1, banner_y1), (banner_x2, banner_y2)],
-            radius=BANNER_R, fill=(255, 140, 0, 255)
+            radius=BANNER_R, fill=banner_fill
         )
         draw.text((BANNER_CX - tw1 // 2, text_start_y - yo1), line1, fill="white", font=font1)
         draw.text((BANNER_CX - tw2 // 2, text_start_y + th1 + gap_font - yo2), line2, fill="white", font=font2)

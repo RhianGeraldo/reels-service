@@ -13,8 +13,8 @@ from lib.supabase_client import create_job, update_job
 # =====================================================================
 # CONFIGURAÇÕES (Altere a URL do vídeo aqui!)
 # =====================================================================
-VIDEO_URL = "https://drive.google.com/file/d/1Z5u7ltXp_HNHYHlzR_8MjgPPcj-0_4K3/view?usp=drive_link"
-#VIDEO_URL = "https://drive.google.com/uc?export=download&id=1nKwp67CtdcxvBPU5BtAfbEKyGQeDgZEV"
+#VIDEO_URL = "https://drive.google.com/file/d/1Z5u7ltXp_HNHYHlzR_8MjgPPcj-0_4K3/view?usp=drive_link"
+VIDEO_URL = "https://drive.google.com/uc?export=download&id=1nKwp67CtdcxvBPU5BtAfbEKyGQeDgZEV"
 USER_ID = "rhian-dev"
 
 # OPÇÕES DE EDIÇÃO (Altere para True ou False conforme necessário)
@@ -22,10 +22,10 @@ REMOVE_SILENCES = True
 GENERATE_CAPTIONS = True
 GENERATE_OVERLAYS = False
 GENERATE_SORA = False
-DYNAMIC_EDITING = False
+DYNAMIC_EDITING = True
 
 # CONFIGURAÇÕES DE LEGENDA
-# CAPTION_COLOR: Cor da legenda em Hexadecimal (ex: "#FF0000" para vermelho, ou None para o padrão branco)
+# CAPTION_COLOR: Cor da legenda e do banner do hook em Hexadecimal (ex: "#FF0000" para vermelho, ou None para branco/laranja padrão)
 CAPTION_COLOR = None
 # CAPTION_POSITION: Posição/altura da legenda.
 # Valores suportados: "middle" (no meio), "below_middle" (abaixo do meio) ou "bottom" (embaixo - padrão)
@@ -49,7 +49,7 @@ BRIGHTNESS = 0.0
 # CONTRAST: Ajuste de contraste (0.0 a 10.0, sendo 1.0 o padrão)
 CONTRAST = 1.0
 # SATURATION: Ajuste de saturação (0.0 a 10.0, sendo 1.0 o padrão)
-SATURATION = 0.5
+SATURATION = 1.0
 # SHARPNESS: Nitidez (0.0 a 2.0, sendo 0.0 desativado)
 SHARPNESS = 1.0
 # =====================================================================
