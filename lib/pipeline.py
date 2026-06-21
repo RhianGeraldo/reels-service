@@ -237,8 +237,7 @@ def run_pipeline(
             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         ]
         if denoise_audio:
-            model_path = os.path.join(os.path.dirname(__file__), "sh.rnnn")
-            cmd.extend(["-af", f"highpass=f=100,arnndn=model='{model_path}'"])
+            cmd.extend(["-af", "highpass=f=80,afftdn=nf=-30:nr=15"])
         cmd.extend([
             "-c:a", "aac", "-b:a", "128k", "-video_track_timescale", "30000",
             cfr_path

@@ -22,7 +22,7 @@ REMOVE_SILENCES = True
 GENERATE_CAPTIONS = True
 GENERATE_OVERLAYS = False
 GENERATE_SORA = False
-DYNAMIC_EDITING = True
+DYNAMIC_EDITING = False
 
 # CONFIGURAÇÕES DE LEGENDA
 # CAPTION_COLOR: Cor da legenda e do banner do hook em Hexadecimal (ex: "#FF0000" para vermelho).
