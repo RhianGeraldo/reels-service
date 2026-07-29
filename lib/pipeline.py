@@ -342,7 +342,18 @@ def run_pipeline(
                     if new_t is not None:
                         ov["insert_at"] = new_t
                         remapped_ov.append(ov)
-                overlay_data = remapped_ov
+                        
+                # NOVO: Ordenar e espaçar os overlays para não grudarem/sobreporem
+                remapped_ov.sort(key=lambda x: x["insert_at"])
+                final_ov = []
+                last_end = 5.0  # Começa a contar depois do hook de 5s
+                for ov in remapped_ov:
+                    if ov["insert_at"] < last_end + 3.0:
+                        ov["insert_at"] = last_end + 3.0
+                    final_ov.append(ov)
+                    last_end = ov["insert_at"] + ov["duration"]
+                    
+                overlay_data = final_ov
                 print(f"[REELS] Remapped {len(overlay_data)} overlays to edited timeline", flush=True)
 
             # ===== 7. GENERATE SORA VIDEOS (OPTIONAL) =====
@@ -1208,7 +1219,7 @@ def add_transition_effects(seg_path, W, H, workdir, seg_index):
 
 def _prepare_overlay_image(img_path, W, H, workdir, idx):
     """Pré-processa imagem decorativa: fit-cover para W x 60% H (faixa inferior).
-    Retorna (caminho_imagem, caminho_mascara) para composição profissional de alpha."""
+    Retorna caminho da imagem RGBA com máscara de gradiente no topo."""
     img_h = int(H * 0.60)
     src = Image.open(img_path).convert("RGB")
     sw, sh = src.size
@@ -1227,41 +1238,32 @@ def _prepare_overlay_image(img_path, W, H, workdir, idx):
         y0 = (new_h - img_h) // 2
         img = img.crop((0, y0, new_w, y0 + img_h))
 
-    # Salva a imagem base sem alpha
-    img_out_path = os.path.join(workdir, f"overlay_img_{idx}.png")
-    img.save(img_out_path, "PNG")
-
     # Cria a máscara de alpha grayscale (Preto = transparente, Branco = opaco)
     mask = Image.new("L", (W, img_h), 255)
     mask_data = mask.load()
-    fade_height = 600  # Fade longo e orgânico como sugerido pelo usuário
-    for y in range(min(fade_height, img_h)):
-        factor = y / float(fade_height)
+    fade_height = int(img_h * 0.5)  # 50% da imagem é fade suave
+    for y in range(fade_height):
+        factor = (y / float(fade_height)) ** 1.5 # ease-in para ficar mais suave
         val = int(255 * factor)
         for x in range(W):
             mask_data[x, y] = val
 
-    # Aplica Gaussian Blur na máscara para "derreter" a borda
-    from PIL import ImageFilter
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=30))
-
-    # Reduz a opacidade máxima para 90% para integrar melhor com o fundo
-    mask_data = mask.load()
+    # Reduz a opacidade máxima para 95%
     for y in range(img_h):
         for x in range(W):
-            mask_data[x, y] = int(mask_data[x, y] * 0.90)
+            mask_data[x, y] = int(mask_data[x, y] * 0.95)
 
-    mask_out_path = os.path.join(workdir, f"overlay_mask_{idx}.png")
-    mask.save(mask_out_path, "PNG")
+    # Aplica a máscara diretamente na imagem via PIL
+    img.putalpha(mask)
 
-    return img_out_path, mask_out_path
+    img_out_path = os.path.join(workdir, f"overlay_img_{idx}.png")
+    img.save(img_out_path, "PNG")
+
+    return img_out_path
 
 
 def apply_image_overlays(video_path, overlay_data, W, H, workdir):
-    """Aplica image overlays no estilo 'split storytelling' com pipeline de alpha profissional:
-    - Combina imagem e máscara via alphamerge
-    - Aplica fade temporal preservando o alpha
-    - Sobrepõe usando format=auto para não achatar o alpha."""
+    """Aplica image overlays no estilo 'split storytelling'."""
     if not overlay_data:
         return video_path
 
@@ -1270,28 +1272,20 @@ def apply_image_overlays(video_path, overlay_data, W, H, workdir):
     overlay_y = H - img_h  # Começa em 40% da tela (768px)
 
     for idx, ov in enumerate(overlay_data):
-        img_prepped, mask_prepped = _prepare_overlay_image(ov["path"], W, H, workdir, str(idx))
+        img_prepped = _prepare_overlay_image(ov["path"], W, H, workdir, str(idx))
         t_start = ov["insert_at"]
         dur = ov["duration"]
         t_end = t_start + dur
         fade_d = min(0.4, dur / 3)
         temp_out = os.path.join(workdir, f"overlay_pass_{idx}.mp4")
 
-        # Filtro Profissional:
-        # 1. Garante formatos corretos para imagem e máscara
-        # 2. alphamerge combina gerando alpha real
-        # 3. fade com alpha=1 preserva a transparência
-        # 4. overlay com format=rgb força a composição em RGB (preserva alpha)
-        # 5. Só converte para yuv420p no final para o encoder
+        # Filtro: loop na imagem RGBA, aplica fade no alpha original, seta PTS para o tempo de inserção
         filt = (
-            f"[1:v]format=rgba[img_rgba];"
-            f"[2:v]format=gray[mask_gray];"
-            f"[img_rgba][mask_gray]alphamerge,format=rgba[img_alpha];"
-            f"[img_alpha]scale={W}:{img_h},setsar=1,"
+            f"[1:v]format=rgba,scale={W}:{img_h},setsar=1,"
             f"fade=in:st=0:d={fade_d:.3f}:alpha=1,"
-            f"fade=out:st={dur - fade_d:.3f}:d={fade_d:.3f}:alpha=1[img_animated];"
-            f"[0:v][img_animated]overlay=0:{overlay_y}:enable='between(t,{t_start},{t_end})':format=rgb,"
-            f"format=yuv420p[vout]"
+            f"fade=out:st={dur - fade_d:.3f}:d={fade_d:.3f}:alpha=1,"
+            f"setpts=PTS+{t_start}/TB[img_animated];"
+            f"[0:v][img_animated]overlay=0:{overlay_y}:enable='between(t,{t_start},{t_end})'[vout]"
         )
 
         try:
@@ -1299,7 +1293,6 @@ def apply_image_overlays(video_path, overlay_data, W, H, workdir):
                 "ffmpeg", "-y",
                 "-noautorotate", "-i", current_path,
                 "-loop", "1", "-t", str(dur + 1), "-i", img_prepped,
-                "-loop", "1", "-t", str(dur + 1), "-i", mask_prepped,
                 "-filter_complex", filt,
                 "-map", "[vout]", "-map", "0:a",
                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
