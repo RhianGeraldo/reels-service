@@ -43,7 +43,7 @@ Endpoint responsável por colocar um novo vídeo na fila de processamento.
 | `caption_color` | `string` | Não | `null` | Cor da legenda e do banner do hook em Hexadecimal (ex: `"#FF0000"`, `"FF0000"`). Se `null`, legenda fica **branca** e banner fica **branco** com texto preto (padrão). Se tiver cor: banner usa a cor com texto branco. |
 | `caption_position` | `string` | Não | `null` | Posição vertical da legenda: `"middle"`, `"below_middle"`, `"bottom"` (padrão). |
 | `denoise_audio` | `boolean` | Não | `true` | Se `true`, aplica filtro de redução de ruído neural (RNNoise) no áudio do vídeo. |
-| `music_url` | `string` | Não | `null` | URL da trilha sonora: link do YouTube, Google Drive, Dropbox, link direto mp3/wav, nome de arquivo local em `music/`, ou `"none"` para desativar. Se `null`, usa a música padrão. |
+| `music_url` | `string` | Não | `null` | URL da trilha sonora: link do YouTube, Google Drive, Dropbox, link direto mp3/wav, nome de arquivo local em `music/`, ou `"none"` para desativar. Se `null` ou não enviado, nenhuma música de fundo é adicionada (sem fallback). |
 | `music_volume` | `float` | Não | `0.15` | Volume da música de fundo (entre `0.0` e `1.0`). |
 | `visual_filter` | `string` | Não | `null` | Preset criativo de cores: `"vibrant"`, `"cinematic"`, `"vintage"`, `"cool"`, `"b&w"`. `null` desativa. |
 | `brightness` | `float` | Não | `0.0` | Ajuste de brilho (-1.0 a 1.0). Pode ser combinado com `visual_filter`. |

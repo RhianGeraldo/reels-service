@@ -237,7 +237,7 @@ Parametros:
 | `caption_color` | Nao | `null` | Cor Hexadecimal da legenda e banner do hook |
 | `caption_position` | Nao | `null` | Posicao da legenda: `"middle"`, `"below_middle"`, `"bottom"` |
 | `denoise_audio` | Nao | `true` | Aplica reducao de ruido no audio do video |
-| `music_url` | Nao | `null` | URL da trilha sonora (YouTube, Drive, mp3 ou `"none"`) |
+| `music_url` | Nao | `null` | URL da trilha sonora (YouTube, Drive, mp3 ou `"none"`. Se não informado, não adiciona música) |
 | `music_volume` | Nao | `0.15` | Volume da musica de fundo (0.0 a 1.0) |
 | `visual_filter` | Nao | `null` | Preset de cor: `"vibrant"`, `"cinematic"`, `"vintage"`, `"cool"`, `"b&w"` |
 | `brightness` | Nao | `0.0` | Ajuste de brilho (-1.0 a 1.0) |

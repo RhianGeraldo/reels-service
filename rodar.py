@@ -47,8 +47,8 @@ CAPTION_POSITION = "below_middle"
 DENOISE_AUDIO = True
 
 # MÚSICA DE FUNDO
-# MUSIC_URL: URL do YouTube/mp3, nome de arquivo em "music/", "none" para desativar ou None para padrão
-MUSIC_URL = "https://www.youtube.com/watch?v=OPugs48z2GU"
+# MUSIC_URL: URL do YouTube/mp3, nome de arquivo em "music/", "none" ou None para sem música (padrão)
+MUSIC_URL = None
 MUSIC_VOLUME = 0.10
 
 # FILTROS VISUAIS E AJUSTES DE IMAGEM

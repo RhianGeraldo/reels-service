@@ -464,57 +464,61 @@ def run_pipeline(
 
         # ===== 11. DOWNLOAD MUSIC + BURN CAPTIONS + 3-AUDIO MIX =====
         progress(82, "downloading_music")
-        resolved_music_path = MUSIC_PATH  # default
-        if music_url:
-            m_url = music_url.strip().lower()
-            if m_url == "none":
+        resolved_music_path = None
+        if music_url and music_url.strip():
+            m_url = music_url.strip()
+            if m_url.lower() == "none":
                 resolved_music_path = None
                 print("[REELS] Music disabled by user.", flush=True)
             else:
-                m_url = music_url.strip()
-                try:
-                    progress(82, "downloading_music")
-                    downloaded_music = os.path.join(workdir, "bg_music.mp3")
+                # Check if it's a local file in music/ folder
+                local_music_candidate = os.path.join(os.path.dirname(os.path.dirname(__file__)), "music", m_url)
+                if os.path.exists(local_music_candidate):
+                    resolved_music_path = local_music_candidate
+                    print(f"[REELS] Using local music file: {resolved_music_path}", flush=True)
+                else:
+                    try:
+                        progress(82, "downloading_music")
+                        downloaded_music = os.path.join(workdir, "bg_music.mp3")
 
-                    # YouTube -> yt-dlp
-                    is_youtube = "youtube.com" in m_url or "youtu.be" in m_url
-                    if is_youtube:
-                        import sys as _sys
-                        yt_dlp_bin = os.path.join(os.path.dirname(_sys.executable), "yt-dlp")
-                        temp_output_template = os.path.join(workdir, "yt_download.%(ext)s")
-                        cmd = [yt_dlp_bin, "--no-playlist", "-x", "--audio-format", "mp3",
-                               "-o", temp_output_template, m_url]
-                        print(f"[REELS] Downloading YouTube audio using command: {' '.join(cmd)}", flush=True)
-                        res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-                        if res.returncode != 0:
-                            raise ValueError(f"yt-dlp failed: {res.stderr}")
-                        extracted_mp3 = os.path.join(workdir, "yt_download.mp3")
-                        if os.path.exists(extracted_mp3):
-                            shutil.move(extracted_mp3, downloaded_music)
+                        # YouTube -> yt-dlp
+                        is_youtube = "youtube.com" in m_url.lower() or "youtu.be" in m_url.lower()
+                        if is_youtube:
+                            import sys as _sys
+                            yt_dlp_bin = os.path.join(os.path.dirname(_sys.executable), "yt-dlp")
+                            temp_output_template = os.path.join(workdir, "yt_download.%(ext)s")
+                            cmd = [yt_dlp_bin, "--no-playlist", "-x", "--audio-format", "mp3",
+                                   "-o", temp_output_template, m_url]
+                            print(f"[REELS] Downloading YouTube audio using command: {' '.join(cmd)}", flush=True)
+                            res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+                            if res.returncode != 0:
+                                raise ValueError(f"yt-dlp failed: {res.stderr}")
+                            extracted_mp3 = os.path.join(workdir, "yt_download.mp3")
+                            if os.path.exists(extracted_mp3):
+                                shutil.move(extracted_mp3, downloaded_music)
+                            else:
+                                found = False
+                                for f_name in os.listdir(workdir):
+                                    if f_name.startswith("yt_download") and f_name.endswith(".mp3"):
+                                        shutil.move(os.path.join(workdir, f_name), downloaded_music)
+                                        found = True
+                                        break
+                                if not found:
+                                    raise ValueError("Could not find extracted mp3 file from yt-dlp")
+                            resolved_music_path = downloaded_music
+                            print(f"[REELS] YouTube audio successfully downloaded: {os.path.getsize(resolved_music_path)} bytes", flush=True)
                         else:
-                            found = False
-                            for f_name in os.listdir(workdir):
-                                if f_name.startswith("yt_download") and f_name.endswith(".mp3"):
-                                    shutil.move(os.path.join(workdir, f_name), downloaded_music)
-                                    found = True
-                                    break
-                            if not found:
-                                raise ValueError("Could not find extracted mp3 file from yt-dlp")
-                        resolved_music_path = downloaded_music
-                        print(f"[REELS] YouTube audio successfully downloaded: {os.path.getsize(resolved_music_path)} bytes", flush=True)
-                    else:
-                        # Google Drive, Dropbox, or direct link
-                        download_file(m_url, downloaded_music)
-                        resolved_music_path = downloaded_music
-                        print(f"[REELS] Downloaded custom music: {os.path.getsize(resolved_music_path)} bytes", flush=True)
+                            # Google Drive, Dropbox, or direct link
+                            download_file(m_url, downloaded_music)
+                            resolved_music_path = downloaded_music
+                            print(f"[REELS] Downloaded custom music: {os.path.getsize(resolved_music_path)} bytes", flush=True)
 
-                except Exception as e:
-                    print(f"[REELS] Failed to download/verify music from {m_url} (error: {e}). Falling back to default music.", flush=True)
-                    resolved_music_path = MUSIC_PATH
+                    except Exception as e:
+                        print(f"[REELS] Failed to download/verify music from {m_url} (error: {e}). No music will be added.", flush=True)
+                        resolved_music_path = None
         else:
-            # Check if it's a local file in music/
-            if music_url is None:
-                resolved_music_path = MUSIC_PATH
+            resolved_music_path = None
+            print("[REELS] No music_url specified. Skipping background music.", flush=True)
 
         progress(85, "burning_captions")
         print("[REELS] Starting burn_captions_and_music (3-audio mix)...", flush=True)
@@ -1538,8 +1542,7 @@ def burn_captions_and_music(video_path, ass_path, workdir, sfx_track_path=None, 
 
     final_path = os.path.join(workdir, "REELS_FINAL.mp4")
 
-    if music_path is None:
-        music_path = MUSIC_PATH
+
 
     has_music = music_path and os.path.exists(music_path)
     has_sfx = sfx_track_path and os.path.exists(sfx_track_path)
