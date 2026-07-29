@@ -221,14 +221,29 @@ curl -X POST https://SEU_DOMINIO/edit \
 ```
 
 Parametros:
-| Campo | Obrigatorio | Descricao |
-|-------|-------------|-----------|
-| `user_id` | Sim | ID do usuario (deve existir em user_settings) |
-| `video_url` | Sim | URL publica do video bruto |
-| `hook_line1` | Nao | Texto linha 1 do hook (IA gera se nao passar) |
-| `hook_line2` | Nao | Texto linha 2 do hook (IA gera se nao passar) |
-| `zoom_levels` | Nao | Padrao de zoom dos segmentos (default: [1.0, 1.5, 1.0, 1.6]) |
-| `generate_sora` | Nao | Gerar videos Sora? (default: true) |
+| Campo | Obrigatorio | Padrão | Descricao |
+|-------|:-----------:|:------:|-----------|
+| `user_id` | Sim | - | ID do usuario (deve existir em user_settings) |
+| `video_url` | Sim | - | URL publica do video bruto (.mp4) |
+| `dynamic_editing` | Nao | `true` | Ativa IA para hook, zoom e overlays (false = modo pass-through) |
+| `remove_silences` | Nao | `true` | Remove silencios com auto-editor |
+| `generate_captions` | Nao | `true` | Transcreve e adiciona legendas karaokê |
+| `generate_overlays` | Nao | `true` | Gera e aplica imagens decorativas de overlay |
+| `image_provider` | Nao | `"gemini"` | Provedor de imagens IA: `"gemini"` ou `"openai"` |
+| `generate_sora` | Nao | `true` | Gerar videos B-Roll Sora (OpenAI) |
+| `hook_line1` | Nao | `null` | Texto linha 1 do hook (IA gera se nao passar) |
+| `hook_line2` | Nao | `null` | Texto linha 2 do hook (IA gera se nao passar) |
+| `zoom_levels` | Nao | `[1.0, 1.5, 1.0, 1.6]` | Padrao de zoom alternado dos segmentos |
+| `caption_color` | Nao | `null` | Cor Hexadecimal da legenda e banner do hook |
+| `caption_position` | Nao | `null` | Posicao da legenda: `"middle"`, `"below_middle"`, `"bottom"` |
+| `denoise_audio` | Nao | `true` | Aplica reducao de ruido no audio do video |
+| `music_url` | Nao | `null` | URL da trilha sonora (YouTube, Drive, mp3 ou `"none"`) |
+| `music_volume` | Nao | `0.15` | Volume da musica de fundo (0.0 a 1.0) |
+| `visual_filter` | Nao | `null` | Preset de cor: `"vibrant"`, `"cinematic"`, `"vintage"`, `"cool"`, `"b&w"` |
+| `brightness` | Nao | `0.0` | Ajuste de brilho (-1.0 a 1.0) |
+| `contrast` | Nao | `1.0` | Multiplicador de contraste (0.0 a 10.0) |
+| `saturation` | Nao | `1.0` | Multiplicador de saturacao (0.0 a 10.0) |
+| `sharpness` | Nao | `0.0` | Intensidade do filtro de nitidez (0.0 a 2.0) |
 
 Resposta (HTTP 202):
 ```json
@@ -317,11 +332,11 @@ curl -H "Authorization: Bearer SUA_SERVICE_SECRET" \
   - 3 prompts pra videos Sora (cutaway)
   - 8+ prompts pra overlay images (Estilo CapCut com fusão)
 
-### 5. Geracao de Imagens (Gemini)
-- Gemini 3 Pro Image Preview
-- 2 imagens hook + 8+ overlay images
-- Retry: 3 tentativas, 3s entre cada
-- Falha graceful: overlay que falha e pulado
+### 5. Geracao de Imagens (Gemini / OpenAI)
+- Gemini 3 Pro Image Preview ou DALL-E 3
+- 2 imagens hook + 8+ overlay images geradas em **paralelo (ThreadPoolExecutor)**
+- Retry: 3 tentativas com fallback para OpenRouter em caso de rate-limit
+- Falha graceful: overlay que falha é pulado sem parar a edição
 
 ### 6. Geracao de Videos Sora
 - OpenAI Sora 2 API
@@ -333,7 +348,7 @@ curl -H "Authorization: Bearer SUA_SERVICE_SECRET" \
 - **Imagem decorativa** no topo (16:9)
 - **Video** embaixo (comeca em img_h = W*9/16)
 - **Banner laranja** flutuando entre os dois:
-  - Cor: RGB(255, 140, 0)
+  - Cor: RGB(255, 140, 0) (ou customizada via `caption_color`)
   - Dimensao: 85% da largura, 11.5% da altura
   - Rounded corners: 2.5% da largura
   - 2 linhas de texto Impact (branco)
@@ -349,28 +364,29 @@ curl -H "Authorization: Bearer SUA_SERVICE_SECRET" \
   - Ken Burns (zoom lento 1.0→1.06x)
   - CrossFade in/out de 0.3s
 
-### 9. Image Overlays (Estilo CapCut)
+### 9. Image Overlays (Estilo CapCut — Passa Única)
 - **Vídeo Base**: O vídeo original roda em tela cheia no fundo.
 - **Sobreposição**: A imagem gerada pela IA é inserida na faixa inferior (ocupando 60% da tela).
 - **Fusão (Feather)**: Aplica-se uma máscara de degradê (gradient mask) de 600px no topo da imagem para fundi-la suavemente com o vídeo, sem linhas duras.
-- **Pipeline de Alpha**: Processamento profissional com `alphamerge` e formato `RGBA` para não achatar a transparência.
+- **Single-Pass FFmpeg**: Todas as sobreposições são aplicadas em **uma única passagem de filtro** (`filter_complex`), sem re-codificar o vídeo múltiplas vezes.
 
 ### 10. Captions Karaoke (ASS)
-- Re-transcreve video final com Whisper
+- Reutiliza os timestamps da 1ª transcrição Whisper com remapeamento (`remap_ts`), **eliminando a 2ª chamada da API**.
 - Formato ASS v4+ (23 campos)
 - Karaoke: `{\kf<duracao>}palavra` — destaca palavra por palavra
-- Fonte Helvetica Neue, outline 5, posicao inferior
+- Fonte Helvetica Neue, outline 5, posição customizável (`middle`, `below_middle`, `bottom`)
 
 ### 11. Mix de Audio (3 faixas)
 - **Voz**: volume 1.0 (original)
-- **Musica** (epic_games.mp3): volume 0.12 (12%)
+- **Musica** (epic_games.mp3 ou customizada): volume configurável (default 0.15)
 - **SFX** (pops nas transicoes): volume 0.35
 - Fallback graceful: se musica/SFX nao disponivel, adapta
 
-### 12. Parametros de Saida
+### 12. Parametros de Saida (Otimizados para CPU)
 - Codec: H.264 (libx264)
-- Bitrate video: 8000k
-- Bitrate audio: 192k AAC
+- Preset: `superfast`
+- CRF: `22` (alta velocidade com fidelidade visual perfeita)
+- Bitrate audio: 128k/192k AAC
 - Pixel format: yuv420p
 - Flag: movflags +faststart (streaming otimizado)
 - FPS: 30
@@ -483,13 +499,13 @@ CMD ["gunicorn", "--bind", "0.0.0.0:3001", "--timeout", "600", "--workers", "1",
 
 | API | Uso | Custo estimado |
 |-----|-----|----------------|
-| Whisper | 2 transcricoes (~2 min cada) | ~$0.02 |
+| Whisper | 1 transcricao (~1 min) | ~$0.006 |
 | GPT-4o-mini | 1 analise de conteudo | ~$0.01 |
 | Gemini | 10 imagens (2 hook + 8 overlay) | ~$0.05 |
 | Sora 2 | 3 videos de 4s | ~$0.45 |
-| **Total** | | **~$0.53/video** |
+| **Total** | | **~$0.51/video** |
 
-Sem Sora (`generate_sora: false`): ~$0.08/video
+Sem Sora (`generate_sora: false`): ~$0.06/video
 
 ---
 

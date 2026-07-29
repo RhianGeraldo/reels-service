@@ -27,6 +27,7 @@ import shutil
 import tempfile
 import subprocess
 import requests
+import concurrent.futures
 from PIL import Image, ImageDraw, ImageFont
 from typing import Callable
 from lib.supabase_client import upload_to_storage
@@ -234,7 +235,7 @@ def run_pipeline(
         cmd = [
             "ffmpeg", "-y", "-display_rotation", "0", "-i", video_path,
             "-vf", vf,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
         ]
         if denoise_audio:
             cmd.extend(["-af", "highpass=f=80,afftdn=nf=-30:nr=15"])
@@ -318,12 +319,14 @@ def run_pipeline(
                 overlay_specs = filter_overlay_collisions(overlay_specs, sora_prompts)
                 print(f"[REELS] After collision filter: {len(overlay_specs)} overlays", flush=True)
 
-            # ===== 6. GENERATE HOOK IMAGES =====
+            # ===== 6. GENERATE HOOK IMAGES (PARALLEL) =====
             progress(28, "generating_hook_images")
             if generate_overlays:
-                hook_img_a = generate_image(image_provider, hook_images_prompts[0], openai_key, gemini_key, workdir, "hook_a.png", openrouter_key=openrouter_key)
-                time.sleep(2)  # rate limit
-                hook_img_b = generate_image(image_provider, hook_images_prompts[1], openai_key, gemini_key, workdir, "hook_b.png", openrouter_key=openrouter_key)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    fut_a = executor.submit(generate_image, image_provider, hook_images_prompts[0], openai_key, gemini_key, workdir, "hook_a.png", openrouter_key)
+                    fut_b = executor.submit(generate_image, image_provider, hook_images_prompts[1], openai_key, gemini_key, workdir, "hook_b.png", openrouter_key)
+                    hook_img_a = fut_a.result()
+                    hook_img_b = fut_b.result()
             else:
                 hook_img_a = None
                 hook_img_b = None
@@ -424,10 +427,26 @@ def run_pipeline(
         progress(80, "generating_captions")
         print(f"[REELS] noCaption file: {os.path.getsize(noCaption_path)} bytes", flush=True)
         if generate_captions_enabled:
+            captions_words = None
+            if dynamic_editing and words and remap_ts:
+                remapped_w = []
+                for w in words:
+                    st = remap_ts(w["start"])
+                    en = remap_ts(w["end"])
+                    if st is not None and en is not None:
+                        remapped_w.append({
+                            "word": w["word"],
+                            "start": st,
+                            "end": en
+                        })
+                if remapped_w:
+                    captions_words = remapped_w
+
             ass_path = generate_captions(
                 noCaption_path, openai_key, W, H, workdir,
                 groq_key=groq_key, openrouter_key=openrouter_key,
-                caption_color=caption_color, caption_position=caption_position
+                caption_color=caption_color, caption_position=caption_position,
+                words=captions_words
             )
             print(f"[REELS] ASS captions generated", flush=True)
         else:
@@ -842,7 +861,7 @@ def generate_sora_videos(sora_prompts, openai_key, workdir, target_w, target_h):
                 subprocess.run([
                     "ffmpeg", "-y", "-i", raw_path,
                     "-vf", f"scale={target_w}:{target_h}",
-                    "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-an", out_path
+                    "-c:v", "libx264", "-preset", "superfast", "-crf", "22", "-an", out_path
                 ], capture_output=True)
                 paths.append({"path": out_path, "insert_at": job["insert_at"]})
                 print(f"[SORA] Job {job['index']} completed", flush=True)
@@ -907,24 +926,39 @@ def build_timeline_map(segments, hook_dur):
 
 
 def generate_overlay_images(overlay_specs, provider, openai_key, gemini_key, workdir, openrouter_key=None):
-    """Gera 8+ overlay images via provider escolhido. Pula falhas sem matar o pipeline."""
-    results = []
-    for i, spec in enumerate(overlay_specs):
+    """Gera overlay images via provider escolhido em paralelo. Pula falhas sem matar o pipeline."""
+    if not overlay_specs:
+        return []
+
+    def _fetch(item):
+        i, spec = item
         prompt = spec.get("prompt", "")
         if not prompt:
-            continue
+            return None
         try:
             path = generate_image(provider, prompt, openai_key, gemini_key, workdir, f"overlay_{i}.png", openrouter_key=openrouter_key)
-            results.append({
+            print(f"[REELS] Overlay image {i} generated: {prompt[:50]}...", flush=True)
+            return {
+                "idx": i,
                 "path": path,
                 "insert_at": spec.get("insert_at", 0),
                 "duration": spec.get("duration", 2.5),
                 "mode": spec.get("mode", "blur_overlay"),
-            })
-            print(f"[REELS] Overlay image {i} generated: {prompt[:50]}...", flush=True)
+            }
         except Exception as e:
             print(f"[REELS] Overlay image {i} failed (skipping): {e}", flush=True)
-        time.sleep(2)  # rate limit
+            return None
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, len(overlay_specs))) as executor:
+        futures = list(executor.map(_fetch, enumerate(overlay_specs)))
+        for res in futures:
+            if res is not None:
+                results.append(res)
+
+    results.sort(key=lambda x: x["idx"])
+    for r in results:
+        del r["idx"]
     return results
 
 
@@ -1055,7 +1089,7 @@ def edit_video(video_path, W, H, hook_frame_a_path, hook_frame_b_path,
             f"[0:v]format=rgba[ov];"
             f"[bg][ov]overlay=0:0[out]",
             "-map", "[out]", "-map", "1:a?",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
             "-c:a", "aac", "-b:a", "128k",
             "-r", "30", out_path
         ], capture_output=True, text=True)
@@ -1104,7 +1138,7 @@ def edit_video(video_path, W, H, hook_frame_a_path, hook_frame_b_path,
             # Sem zoom — corte direto
             r = subprocess.run([
                 "ffmpeg", "-y", "-noautorotate", "-ss", str(start), "-t", str(dur), "-i", video_path,
-                "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
                 "-c:a", "aac", "-b:a", "128k", "-r", "30", seg_path
             ], capture_output=True, text=True)
         else:
@@ -1116,7 +1150,7 @@ def edit_video(video_path, W, H, hook_frame_a_path, hook_frame_b_path,
             r = subprocess.run([
                 "ffmpeg", "-y", "-noautorotate", "-ss", str(start), "-t", str(dur), "-i", video_path,
                 "-vf", f"scale={zw}:{zh},crop={W}:{H}",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
                 "-c:a", "aac", "-b:a", "128k", "-r", "30", seg_path
             ], capture_output=True, text=True)
 
@@ -1136,7 +1170,7 @@ def edit_video(video_path, W, H, hook_frame_a_path, hook_frame_b_path,
     out_path = os.path.join(workdir, "reels_noCaption.mp4")
     r = subprocess.run([
         "ffmpeg", "-y", "-noautorotate", "-f", "concat", "-safe", "0", "-i", concat_list,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
         "-c:a", "aac", "-b:a", "128k", "-r", "30",
         out_path
     ], capture_output=True, text=True)
@@ -1183,7 +1217,7 @@ def edit_video(video_path, W, H, hook_frame_a_path, hook_frame_b_path,
                 f"setpts=PTS+{insert_at}/TB[ov];"
                 f"[0:v][ov]overlay=enable='between(t,{insert_at},{insert_at + sora_dur})'[out]",
                 "-map", "[out]", "-map", "0:a",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
                 "-c:a", "copy", "-shortest", temp_out
             ], capture_output=True)
             if os.path.exists(temp_out) and os.path.getsize(temp_out) > 0:
@@ -1203,7 +1237,7 @@ def add_transition_effects(seg_path, W, H, workdir, seg_index):
         subprocess.run([
             "ffmpeg", "-y", "-noautorotate", "-i", seg_path,
             "-vf", f"fade=in:st=0:d=0.15:color=white",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
             "-c:a", "aac", "-b:a", "128k", "-r", "30",
             final_path
         ], capture_output=True, check=True)
@@ -1263,55 +1297,69 @@ def _prepare_overlay_image(img_path, W, H, workdir, idx):
 
 
 def apply_image_overlays(video_path, overlay_data, W, H, workdir):
-    """Aplica image overlays no estilo 'split storytelling'."""
+    """Aplica image overlays no estilo 'split storytelling' em uma única passagem de FFmpeg."""
     if not overlay_data:
         return video_path
 
-    current_path = video_path
     img_h = int(H * 0.60)
     overlay_y = H - img_h  # Começa em 40% da tela (768px)
 
+    img_prepped_list = []
     for idx, ov in enumerate(overlay_data):
         img_prepped = _prepare_overlay_image(ov["path"], W, H, workdir, str(idx))
+        img_prepped_list.append((img_prepped, ov))
+
+    temp_out = os.path.join(workdir, "overlays_combined.mp4")
+
+    cmd = ["ffmpeg", "-y", "-noautorotate", "-i", video_path]
+
+    for img_path, ov in img_prepped_list:
+        dur = ov["duration"]
+        cmd.extend(["-loop", "1", "-t", f"{dur + 1:.2f}", "-i", img_path])
+
+    filter_parts = []
+    last_v = "0:v"
+
+    for idx, (img_path, ov) in enumerate(img_prepped_list):
+        input_idx = idx + 1
         t_start = ov["insert_at"]
         dur = ov["duration"]
         t_end = t_start + dur
         fade_d = min(0.4, dur / 3)
-        temp_out = os.path.join(workdir, f"overlay_pass_{idx}.mp4")
+        img_node = f"img_{idx}"
+        next_v = f"v{idx + 1}" if idx < len(img_prepped_list) - 1 else "vout"
 
-        # Filtro: loop na imagem RGBA, aplica fade no alpha original, seta PTS para o tempo de inserção
-        filt = (
-            f"[1:v]format=rgba,scale={W}:{img_h},setsar=1,"
+        filter_parts.append(
+            f"[{input_idx}:v]format=rgba,scale={W}:{img_h},setsar=1,"
             f"fade=in:st=0:d={fade_d:.3f}:alpha=1,"
             f"fade=out:st={dur - fade_d:.3f}:d={fade_d:.3f}:alpha=1,"
-            f"setpts=PTS+{t_start}/TB[img_animated];"
-            f"[0:v][img_animated]overlay=0:{overlay_y}:enable='between(t,{t_start},{t_end})'[vout]"
+            f"setpts=PTS+{t_start:.3f}/TB[{img_node}]"
         )
+        filter_parts.append(
+            f"[{last_v}][{img_node}]overlay=0:{overlay_y}:enable='between(t,{t_start:.3f},{t_end:.3f})'[{next_v}]"
+        )
+        last_v = next_v
 
-        try:
-            cmd = [
-                "ffmpeg", "-y",
-                "-noautorotate", "-i", current_path,
-                "-loop", "1", "-t", str(dur + 1), "-i", img_prepped,
-                "-filter_complex", filt,
-                "-map", "[vout]", "-map", "0:a",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-                "-c:a", "copy", temp_out
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if os.path.exists(temp_out) and os.path.getsize(temp_out) > 0:
-                current_path = temp_out
-                print(f"[REELS] Overlay {idx + 1}/{len(overlay_data)} applied (professional alpha blend)", flush=True)
-            else:
-                tail = "\n".join(result.stderr.splitlines()[-20:])
-                print(
-                    f"[REELS] Overlay {idx + 1} failed (rc={result.returncode}), stderr_tail:\n{tail}",
-                    flush=True,
-                )
-        except Exception as e:
-            print(f"[REELS] Overlay {idx + 1} error: {e}", flush=True)
+    full_filter = ";".join(filter_parts)
 
-    return current_path
+    try:
+        cmd.extend([
+            "-filter_complex", full_filter,
+            "-map", "[vout]", "-map", "0:a",
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
+            "-c:a", "copy", temp_out
+        ])
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if os.path.exists(temp_out) and os.path.getsize(temp_out) > 0:
+            print(f"[REELS] All {len(overlay_data)} image overlays applied in single pass", flush=True)
+            return temp_out
+        else:
+            tail = "\n".join(result.stderr.splitlines()[-25:])
+            print(f"[REELS] Combined overlay pass failed (rc={result.returncode}), stderr_tail:\n{tail}", flush=True)
+    except Exception as e:
+        print(f"[REELS] Combined overlay error: {e}", flush=True)
+
+    return video_path
 
 
 
@@ -1394,10 +1442,13 @@ def collect_sfx_timestamps(segments, overlay_data, hook_dur):
     return timestamps
 
 
-def generate_captions(video_path, openai_key, W, H, workdir, groq_key=None, openrouter_key=None, caption_color=None, caption_position=None):
-    """Gera captions ASS karaokê a partir do vídeo renderizado."""
-    transcription = transcribe_whisper(video_path, openai_key, workdir, groq_key=groq_key, openrouter_key=openrouter_key)
-    words = transcription.get("words", [])
+def generate_captions(video_path, openai_key, W, H, workdir, groq_key=None, openrouter_key=None, caption_color=None, caption_position=None, words=None):
+    """Gera captions ASS karaokê a partir do vídeo renderizado ou palavras remapeadas."""
+    if words is None:
+        transcription = transcribe_whisper(video_path, openai_key, workdir, groq_key=groq_key, openrouter_key=openrouter_key)
+        words = transcription.get("words", [])
+    else:
+        print(f"[REELS] Reusing remapped transcription ({len(words)} words) for ASS captions (skipping 2nd Whisper API call)", flush=True)
 
     FONT_SIZE = max(int(60 * W / 1080), 20)
     WORDS_PER_LINE = 5
@@ -1478,7 +1529,7 @@ def burn_captions_and_music(video_path, ass_path, workdir, sfx_track_path=None, 
         subprocess.run([
             "ffmpeg", "-y", "-noautorotate", "-i", video_path,
             "-vf", f"ass={ass_path}",
-            "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "22",
             "-pix_fmt", "yuv420p", "-c:a", "copy",
             with_caption
         ], capture_output=True, check=True)
