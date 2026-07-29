@@ -432,8 +432,9 @@ def run_pipeline(
                 remapped_w = []
                 for w in words:
                     st = remap_ts(w["start"])
-                    en = remap_ts(w["end"])
-                    if st is not None and en is not None:
+                    if st is not None:
+                        w_dur = max(0.05, w["end"] - w["start"])
+                        en = st + w_dur
                         remapped_w.append({
                             "word": w["word"],
                             "start": st,
@@ -903,11 +904,11 @@ def build_timeline_map(segments, hook_dur):
     """Map original video timestamps to edited video timestamps.
 
     Edited video = hook (0..hook_dur) + segments concatenated.
-    Segment 0 may start at hook_dur instead of its original start.
+    Segment 0 starts at hook_dur in the edited timeline.
     Returns remap(orig_t) -> edited_t or None if outside included segments.
     """
+    intervals = [(0.0, hook_dur, 0.0)]  # Hook clip covers 0..hook_dur in original and edited
     edited_pos = hook_dur
-    intervals = []  # (orig_start, orig_end, edited_start)
 
     for i, seg in enumerate(segments):
         s = seg["start"] if isinstance(seg, dict) else seg[0]
@@ -922,7 +923,7 @@ def build_timeline_map(segments, hook_dur):
 
     def remap(orig_t):
         for orig_s, orig_e, ed_s in intervals:
-            if orig_s <= orig_t < orig_e:
+            if orig_s <= orig_t <= orig_e:
                 return ed_s + (orig_t - orig_s)
         return None
 
